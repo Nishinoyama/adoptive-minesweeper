@@ -19,7 +19,7 @@ pub enum CellState {
 }
 
 #[wasm_bindgen]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Board {
     width: u32,
     height: u32,
@@ -27,6 +27,7 @@ pub struct Board {
     cells: Vec<Cell>,
     stats: Vec<CellState>,
     numbers: Vec<u8>,
+    pass_rate: f64,
 }
 
 impl Board {
@@ -86,6 +87,7 @@ impl Board {
             cells,
             stats,
             numbers,
+            pass_rate: 1.0,
         }
     }
     pub fn width(&self) -> u32 {
@@ -106,17 +108,28 @@ impl Board {
     pub fn numbers(&self) -> *const u8 {
         self.numbers.as_ptr()
     }
+    pub fn pass_rate(&self) -> f64 {
+        self.pass_rate
+    }
     pub fn rest_bombs(&self) -> u32 {
         self.bombs() - self.cells.iter().filter(|&&c| c == Cell::Bomb).count() as u32
+    }
+    pub fn rest_cells(&self) -> u32 {
+        self.cells.iter().filter(|&&c| c == Cell::Unsettled).count() as u32
     }
     pub fn is_revealed(&self, row: u32, column: u32) -> bool {
         let idx = self.get_index(row, column);
         self.stats[idx] == CellState::Revealed
     }
-    pub fn reveal(&self, row: u32, column: u32, mut number: u8) -> Self {
+    pub fn reveal(&self, row: u32, column: u32, mut number: u8) -> Option<Board> {
         let idx = self.get_index(row, column);
         if self.stats[idx] == CellState::Revealed {
-            return self.clone();
+            return None;
+        }
+        if self.cells[idx] == Cell::Bomb {
+            let mut new_board = self.clone();
+            new_board.stats[idx] = CellState::Revealed;
+            return Some(new_board);
         }
         let mut new_board = self.clone();
         if self
@@ -126,12 +139,20 @@ impl Board {
         {
             number = 255;
         }
+        let pass_rate = if self.cells[idx] == Cell::Unsettled {
+            let rater = SolvingBoard::from(self.clone());
+            rater.pass_rate(idx)
+        } else {
+            1.0
+        };
         new_board.reveal_inner(row, column, number);
         let solver = SolvingBoard::from(new_board.clone());
         if solver.is_valid() {
-            new_board
+            new_board.pass_rate *= pass_rate;
+            new_board.solve();
+            Some(new_board)
         } else {
-            self.clone()
+            None
         }
     }
     fn reveal_inner(&mut self, row: u32, column: u32, number: u8) {
@@ -139,7 +160,6 @@ impl Board {
         self.cells[idx] = Cell::Empty;
         self.stats[idx] = CellState::Revealed;
         self.numbers[idx] = number;
-        self.solve();
     }
 
     fn is_valid(&self) -> bool {
@@ -306,6 +326,7 @@ mod tests {
                     _ => unreachable!(),
                 })
                 .collect(),
+            pass_rate: 1.0,
         };
         assert!(board.is_valid());
     }
