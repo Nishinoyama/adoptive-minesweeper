@@ -12,17 +12,15 @@ impl From<Board> for SolvingBoard {
 }
 
 fn combination(n: u32, r: u32) -> f64 {
-    let mut p = 1.0;
-    for i in 1..=n {
-        p *= i as f64;
+    let mut dp = vec![vec![0.0; n as usize + 1]; n as usize + 1];
+    dp[0][0] = 1.0;
+    for i in 1..=n as usize {
+        dp[i][0] = 1.0;
+        for j in 1..=i {
+            dp[i][j] = dp[i - 1][j - 1] + dp[i - 1][j];
+        }
     }
-    for i in 1..=r {
-        p /= i as f64;
-    }
-    for i in 1..=(n - r) {
-        p /= i as f64;
-    }
-    p
+    dp[n as usize][r as usize]
 }
 
 impl SolvingBoard {
