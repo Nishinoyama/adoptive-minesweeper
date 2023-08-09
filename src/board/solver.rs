@@ -36,40 +36,22 @@ impl SolvingBoard {
         log(&format!("hint_cells: {:?}", hint_cells));
         let mut universe = 0.0;
         let mut valid = 0.0;
-        (0..(1 << n)).for_each(|i| {
-            let (bomb_cells, empty_cells) = {
-                hint_cells.iter().enumerate().fold(
-                    (vec![], vec![]),
-                    |(mut bomb_cells, mut empty_cells), (j, &c)| {
-                        if i & (1u64 << j) != 0 {
-                            bomb_cells.push(c);
-                        } else {
-                            empty_cells.push(c);
-                        }
-                        (bomb_cells, empty_cells)
-                    },
-                )
-            };
-            let mut tmp_board = self.board.clone();
-            bomb_cells.iter().for_each(|&c| {
-                tmp_board.cells[c] = Cell::Bomb;
-                tmp_board.stats[c] = CellState::Revealed;
-            });
-            empty_cells.iter().for_each(|&c| {
-                tmp_board.cells[c] = Cell::Empty;
-                tmp_board.stats[c] = CellState::Revealed;
-            });
-            if tmp_board.is_valid() {
-                let sum = combination(tmp_board.rest_cells(), tmp_board.rest_bombs());
+        self.valid_hint_cell_patterns()
+            .iter()
+            .filter_map(|(bomb_cells, empty_cells)| {
+                let board = self.pattern_applied_board(empty_cells, bomb_cells);
+                board.is_valid().then_some(board)
+            })
+            .for_each(|board| {
+                let sum = combination(board.rest_cells(), board.rest_bombs());
                 universe += sum;
-                if tmp_board.cells[idx] == Cell::Empty {
+                if board.cells[idx] == Cell::Empty {
                     valid += sum;
-                } else if tmp_board.cells[idx] == Cell::Unsettled {
-                    valid += sum / tmp_board.rest_cells() as f64
-                        * (tmp_board.rest_cells() - tmp_board.rest_bombs()) as f64;
+                } else if board.cells[idx] == Cell::Unsettled {
+                    valid += sum / board.rest_cells() as f64
+                        * (board.rest_cells() - board.rest_bombs()) as f64;
                 }
-            }
-        });
+            });
         log(&format!("valid: {}", valid));
         log(&format!("universe: {}", universe));
         log(&format!("pass_rate: {}", valid / universe));
@@ -83,33 +65,47 @@ impl SolvingBoard {
     pub fn valid_boards(&self) -> usize {
         let hint_cells = self.board.hint_cells();
         // brute force search for n-bits
-        let n = hint_cells.len();
-        (0..(1 << n))
-            .filter(|&i| {
-                let (bomb_cells, empty_cells) = {
-                    hint_cells.iter().enumerate().fold(
-                        (vec![], vec![]),
-                        |(mut bomb_cells, mut empty_cells), (j, &c)| {
-                            if i & (1u64 << j) != 0 {
-                                bomb_cells.push(c);
-                            } else {
-                                empty_cells.push(c);
-                            }
-                            (bomb_cells, empty_cells)
-                        },
-                    )
-                };
-                let mut tmp_board = self.board.clone();
-                bomb_cells.iter().for_each(|&c| {
-                    tmp_board.cells[c] = Cell::Bomb;
-                    tmp_board.stats[c] = CellState::Revealed;
-                });
-                empty_cells.iter().for_each(|&c| {
-                    tmp_board.cells[c] = Cell::Empty;
-                    tmp_board.stats[c] = CellState::Revealed;
-                });
-                tmp_board.is_valid()
+        self.valid_hint_cell_patterns().len()
+    }
+
+    fn pattern_applied_board(&self, empty_cells: &[usize], bomb_cells: &[usize]) -> Board {
+        let mut tmp_board = self.board.clone();
+        bomb_cells.iter().for_each(|&c| {
+            tmp_board.cells[c] = Cell::Bomb;
+            tmp_board.stats[c] = CellState::Revealed;
+        });
+        empty_cells.iter().for_each(|&c| {
+            tmp_board.cells[c] = Cell::Empty;
+            tmp_board.stats[c] = CellState::Revealed;
+        });
+        tmp_board
+    }
+
+    fn is_valid_with_cells(&self, empty_cells: &[usize], bomb_cells: &[usize]) -> bool {
+        self.pattern_applied_board(empty_cells, bomb_cells)
+            .is_valid()
+    }
+
+    fn valid_hint_cell_patterns(&self) -> Vec<(Vec<usize>, Vec<usize>)> {
+        self.board
+            .hint_cells()
+            .iter()
+            .fold(vec![(vec![], vec![])], |cells, &i| {
+                cells
+                    .into_iter()
+                    .flat_map(|(bomb_cells, empty_cells)| {
+                        let bomb_cells_added = vec![bomb_cells.clone(), vec![i]].concat();
+                        let empty_cells_added = vec![empty_cells.clone(), vec![i]].concat();
+                        let mut res = vec![];
+                        if self.is_valid_with_cells(&empty_cells, &bomb_cells_added) {
+                            res.push((bomb_cells_added, empty_cells));
+                        }
+                        if self.is_valid_with_cells(&empty_cells_added, &bomb_cells) {
+                            res.push((bomb_cells, empty_cells_added));
+                        }
+                        res
+                    })
+                    .collect()
             })
-            .count()
     }
 }
