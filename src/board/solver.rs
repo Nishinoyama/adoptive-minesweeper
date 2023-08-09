@@ -1,5 +1,4 @@
 use super::*;
-use crate::log;
 
 pub struct SolvingBoard {
     board: Board,
@@ -28,10 +27,6 @@ impl SolvingBoard {
         self.valid_boards() > 0
     }
     pub fn pass_rate(&self, idx: usize) -> f64 {
-        let hint_cells = self.board.hint_cells();
-        // brute force search for n-bits
-        let n = hint_cells.len();
-        log(&format!("hint_cells: {:?}", hint_cells));
         let mut universe = 0.0;
         let mut valid = 0.0;
         self.valid_hint_cell_patterns()
@@ -50,9 +45,6 @@ impl SolvingBoard {
                         * (board.rest_cells() - board.rest_bombs()) as f64;
                 }
             });
-        log(&format!("valid: {}", valid));
-        log(&format!("universe: {}", universe));
-        log(&format!("pass_rate: {}", valid / universe));
         let rate = valid / universe;
         if rate.is_nan() {
             1.0
@@ -61,8 +53,6 @@ impl SolvingBoard {
         }
     }
     pub fn valid_boards(&self) -> usize {
-        let hint_cells = self.board.hint_cells();
-        // brute force search for n-bits
         self.valid_hint_cell_patterns().len()
     }
 
