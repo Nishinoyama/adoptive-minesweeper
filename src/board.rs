@@ -1,4 +1,6 @@
 use crate::board::solver::SolvingBoard;
+use crate::log;
+use std::collections::BTreeSet;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -28,6 +30,8 @@ pub struct Board {
     stats: Vec<CellState>,
     numbers: Vec<u8>,
     pass_rate: f64,
+
+    clue_cells: BTreeSet<usize>,
 }
 
 impl Board {
@@ -88,6 +92,7 @@ impl Board {
             stats,
             numbers,
             pass_rate: 1.0,
+            clue_cells: BTreeSet::from([width as usize + 1]),
         }
     }
     pub fn width(&self) -> u32 {
@@ -107,6 +112,12 @@ impl Board {
     }
     pub fn numbers(&self) -> *const u8 {
         self.numbers.as_ptr()
+    }
+    pub fn is_clue_cell(&self, idx: usize) -> bool {
+        self.clue_cells.contains(&idx)
+    }
+    pub fn is_hint_cell(&self, idx: usize) -> bool {
+        self.hint_cells().contains(&idx)
     }
     pub fn pass_rate(&self) -> f64 {
         self.pass_rate
@@ -150,6 +161,7 @@ impl Board {
         if solver.is_valid() {
             new_board.pass_rate *= pass_rate;
             new_board.solve();
+            new_board.update_clues();
             Some(new_board)
         } else {
             None
@@ -160,6 +172,9 @@ impl Board {
         self.cells[idx] = Cell::Empty;
         self.stats[idx] = CellState::Revealed;
         self.numbers[idx] = number;
+        if number != 255 {
+            self.clue_cells.insert(idx);
+        }
     }
 
     fn is_valid(&self) -> bool {
@@ -203,13 +218,7 @@ impl Board {
         bomb <= self.bombs && bomb + unsettled >= self.bombs
     }
     fn clue_cells(&self) -> Vec<usize> {
-        self.stats
-            .iter()
-            .enumerate()
-            .filter(|&(_, &c)| c == CellState::Revealed)
-            .filter(|&(i, _)| self.numbers[i] != 255)
-            .map(|(i, _)| i)
-            .collect()
+        self.clue_cells.iter().cloned().collect()
     }
     fn hint_cells(&self) -> Vec<usize> {
         let mut hint_cells = self
@@ -286,6 +295,22 @@ impl Board {
             });
         }
     }
+    fn update_clues(&mut self) {
+        let mut clue_cells = self
+            .clue_cells
+            .iter()
+            .filter(|&&c| {
+                !self
+                    .get_neighbours(c)
+                    .iter()
+                    .all(|&nei| self.cells[nei] != Cell::Unsettled)
+            })
+            .copied()
+            .collect();
+        log(&format!("clue_cells: {:?}", clue_cells));
+        self.clue_cells = clue_cells;
+        log(&format!("hint_cells: {:?}", self.hint_cells()));
+    }
 }
 
 mod solver;
@@ -327,6 +352,8 @@ mod tests {
                 })
                 .collect(),
             pass_rate: 1.0,
+
+            clue_cells: BTreeSet::new(),
         };
         assert!(board.is_valid());
     }
