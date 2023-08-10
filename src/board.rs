@@ -265,14 +265,14 @@ impl Board {
             tmp_board.cells[index] = Cell::Bomb;
             tmp_board.stats[index] = CellState::Revealed;
             let solver = SolvingBoard::from(tmp_board.clone());
-            if solver.valid_boards() == 0 {
+            if !tmp_board.is_valid() || !solver.is_valid() {
                 self.cells[index] = Cell::Empty;
             } else {
                 let mut tmp_board = self.clone();
                 tmp_board.cells[index] = Cell::Empty;
                 tmp_board.stats[index] = CellState::Revealed;
                 let solver = SolvingBoard::from(tmp_board.clone());
-                if solver.valid_boards() == 0 {
+                if !tmp_board.is_valid() || !solver.is_valid() {
                     self.cells[index] = Cell::Bomb;
                 }
             }
