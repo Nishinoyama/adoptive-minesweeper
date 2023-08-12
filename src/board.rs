@@ -1,5 +1,6 @@
 use crate::board::solver::SolvingBoard;
 use crate::log;
+use itertools::Itertools;
 use std::collections::BTreeSet;
 use wasm_bindgen::prelude::*;
 
@@ -32,6 +33,7 @@ pub struct Board {
     pass_rate: f64,
 
     clue_cells: BTreeSet<usize>,
+    watching_clue_cells: BTreeSet<usize>,
 }
 
 impl Board {
@@ -93,6 +95,7 @@ impl Board {
             numbers,
             pass_rate: 1.0,
             clue_cells: BTreeSet::from([width as usize + 1]),
+            watching_clue_cells: BTreeSet::new(),
         }
     }
     pub fn width(&self) -> u32 {
@@ -158,7 +161,8 @@ impl Board {
         };
         new_board.reveal_inner(row, column, number);
         let solver = SolvingBoard::from(new_board.clone());
-        if solver.is_valid() {
+        new_board.update_watching_clues(idx);
+        if solver.is_valid_on_watching() {
             new_board.pass_rate *= pass_rate;
             new_board.solve();
             new_board.update_clues();
@@ -175,6 +179,7 @@ impl Board {
         if number != 255 {
             self.clue_cells.insert(idx);
         }
+        self.update_watching_clues(idx);
     }
 
     fn is_valid(&self) -> bool {
@@ -217,8 +222,11 @@ impl Board {
         }
         bomb <= self.bombs && bomb + unsettled >= self.bombs
     }
-    fn clue_cells(&self) -> Vec<usize> {
-        self.clue_cells.iter().cloned().collect()
+    fn clue_cells(&self) -> &BTreeSet<usize> {
+        &self.clue_cells
+    }
+    fn watching_clue_cells(&self) -> &BTreeSet<usize> {
+        &self.watching_clue_cells
     }
     fn hint_cells(&self) -> Vec<usize> {
         let mut hint_cells = self
@@ -231,9 +239,20 @@ impl Board {
         hint_cells.dedup();
         hint_cells
     }
+    fn watching_hint_cells(&self) -> Vec<usize> {
+        let mut hint_cells = self
+            .watching_clue_cells()
+            .iter()
+            .flat_map(|&c| self.get_neighbours(c))
+            .filter(|&c| self.cells[c] == Cell::Unsettled)
+            .collect::<Vec<_>>();
+        hint_cells.sort();
+        hint_cells.dedup();
+        hint_cells
+    }
     pub fn solve(&mut self) {
         // trivial
-        self.clue_cells().into_iter().for_each(|index| {
+        self.clue_cells().clone().into_iter().for_each(|index| {
             let bombs = self
                 .get_neighbours(index)
                 .into_iter()
@@ -259,11 +278,16 @@ impl Board {
                 });
             }
         });
+        // rest
+        if self.rest_bombs() <= 10 {
+            self.solve_by_rest_bomb();
+        }
         // brute
         self.hint_cells().into_iter().for_each(|index| {
             let mut tmp_board = self.clone();
             tmp_board.cells[index] = Cell::Bomb;
             tmp_board.stats[index] = CellState::Revealed;
+            tmp_board.update_watching_clues(index);
             let solver = SolvingBoard::from(tmp_board.clone());
             if !tmp_board.is_valid() || !solver.is_valid() {
                 self.cells[index] = Cell::Empty;
@@ -271,25 +295,38 @@ impl Board {
                 let mut tmp_board = self.clone();
                 tmp_board.cells[index] = Cell::Empty;
                 tmp_board.stats[index] = CellState::Revealed;
+                tmp_board.update_watching_clues(index);
                 let solver = SolvingBoard::from(tmp_board.clone());
                 if !tmp_board.is_valid() || !solver.is_valid() {
                     self.cells[index] = Cell::Bomb;
                 }
             }
         });
-        // rest
+    }
+
+    fn solve_by_rest_bomb(&mut self) {
         let bombs = self.cells.iter().filter(|&&c| c == Cell::Bomb).count() as u32;
-        if bombs == self.bombs {
-            self.cells.iter_mut().for_each(|c| {
-                if *c == Cell::Unsettled {
+        let solver = SolvingBoard::from(self.clone());
+        let (min_hint_bombs, max_hint_bombs) = solver
+            .valid_hint_cell_patterns()
+            .into_iter()
+            .map(|(bs, _)| bs.len() as u32)
+            .minmax()
+            .into_option()
+            .unwrap_or((0, 0));
+        let hint_cells = self.hint_cells();
+        if bombs + min_hint_bombs == self.bombs {
+            self.cells.iter_mut().enumerate().for_each(|(i, c)| {
+                if *c == Cell::Unsettled && !hint_cells.contains(&i) {
                     *c = Cell::Empty;
                 }
             });
         }
-        let unsettles = self.cells.iter().filter(|&&c| c == Cell::Unsettled).count() as u32;
-        if bombs + unsettles == self.bombs {
-            self.cells.iter_mut().for_each(|c| {
-                if *c == Cell::Unsettled {
+        let unsettles = (self.cells.iter().filter(|&&c| c == Cell::Unsettled).count()
+            - hint_cells.len()) as u32;
+        if bombs + unsettles + max_hint_bombs == self.bombs {
+            self.cells.iter_mut().enumerate().for_each(|(i, c)| {
+                if *c == Cell::Unsettled && !hint_cells.contains(&i) {
                     *c = Cell::Bomb;
                 }
             });
@@ -307,9 +344,42 @@ impl Board {
             })
             .copied()
             .collect();
-        log(&format!("clue_cells: {:?}", clue_cells));
         self.clue_cells = clue_cells;
-        log(&format!("hint_cells: {:?}", self.hint_cells()));
+    }
+
+    fn update_watching_clues(&mut self, index: usize) {
+        let mut watching_clue_cells = BTreeSet::from([index]);
+        {
+            let mut stack = vec![index];
+            while let Some(from) = stack.pop() {
+                if self.watching_clue_cells.contains(&from) {
+                    continue;
+                }
+                let nexts = if self.numbers[from] != 255 {
+                    let mut neighbours_neighbours = self
+                        .get_neighbours(from)
+                        .iter()
+                        .flat_map(|&nei| self.get_neighbours(nei))
+                        .collect::<Vec<_>>();
+                    neighbours_neighbours.sort();
+                    neighbours_neighbours.dedup();
+                    neighbours_neighbours
+                } else {
+                    self.get_neighbours(from)
+                };
+                for &next in nexts.iter() {
+                    if !watching_clue_cells.contains(&next) && self.clue_cells.contains(&next) {
+                        stack.push(next);
+                        watching_clue_cells.insert(next);
+                    }
+                }
+            }
+        }
+        self.watching_clue_cells = watching_clue_cells;
+    }
+
+    pub fn debug(&self) -> String {
+        format!("{:?}", self)
     }
 }
 
@@ -354,6 +424,7 @@ mod tests {
             pass_rate: 1.0,
 
             clue_cells: BTreeSet::new(),
+            watching_clue_cells: BTreeSet::new(),
         };
         assert!(board.is_valid());
     }

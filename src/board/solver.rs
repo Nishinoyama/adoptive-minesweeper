@@ -23,10 +23,14 @@ fn combination(n: u32, r: u32) -> f64 {
 }
 
 impl SolvingBoard {
+    pub fn is_valid_on_watching(&self) -> bool {
+        !self.valid_hint_watching_cell_patterns().is_empty()
+    }
     pub fn is_valid(&self) -> bool {
         self.valid_boards() > 0
     }
     pub fn pass_rate(&self, idx: usize) -> f64 {
+        return 1.0;
         let mut universe = 0.0;
         let mut valid = 0.0;
         self.valid_hint_cell_patterns()
@@ -74,8 +78,35 @@ impl SolvingBoard {
             .is_valid()
     }
 
-    fn valid_hint_cell_patterns(&self) -> Vec<(Vec<usize>, Vec<usize>)> {
-        self.board
+    pub fn valid_hint_watching_cell_patterns(&self) -> Vec<(Vec<usize>, Vec<usize>)> {
+        let res =
+            self.board
+                .watching_hint_cells()
+                .iter()
+                .fold(vec![(vec![], vec![])], |cells, &i| {
+                    cells
+                        .into_iter()
+                        .flat_map(|(bomb_cells, empty_cells)| {
+                            let bomb_cells_added = vec![bomb_cells.clone(), vec![i]].concat();
+                            let empty_cells_added = vec![empty_cells.clone(), vec![i]].concat();
+                            let mut res = vec![];
+                            if self.is_valid_with_cells(&empty_cells, &bomb_cells_added) {
+                                res.push((bomb_cells_added, empty_cells));
+                            }
+                            if self.is_valid_with_cells(&empty_cells_added, &bomb_cells) {
+                                res.push((bomb_cells, empty_cells_added));
+                            }
+                            res
+                        })
+                        .collect()
+                });
+        log(&format!("{:?}", res.len()));
+        res
+    }
+
+    pub fn valid_hint_cell_patterns(&self) -> Vec<(Vec<usize>, Vec<usize>)> {
+        let res = self
+            .board
             .hint_cells()
             .iter()
             .fold(vec![(vec![], vec![])], |cells, &i| {
@@ -94,6 +125,8 @@ impl SolvingBoard {
                         res
                     })
                     .collect()
-            })
+            });
+        log(&format!("{:?}", res.len()));
+        res
     }
 }
